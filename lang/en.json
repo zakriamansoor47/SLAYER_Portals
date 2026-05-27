@@ -1,0 +1,5 @@
+{
+    "Chat.Prefix": "{green}[{gold}SLAYER Portals{green}]",
+    "Chat.MaxPortalsReached": "{darkred}You have reached the maximum number of active portals pair you can place {lime}{0}{darkred}/{lime}{1}",
+    "Chat.MaxTeamPortalsReached": "{darkred}The {lime}{0}{darkred} team has reached the maximum number of active portals pair you can place {lime}{1}{darkred}/{lime}{2}"
+}
