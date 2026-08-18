@@ -25,8 +25,9 @@ SLAYER_Portals lets players place paired portals in CS2 and teleport through the
 - Portals are cleared every round and removed on plugin unload.
 
 ## Requirements
-- CounterStrikeSharp
-- [Workshop Addon: Portal Model](https://steamcommunity.com/sharedfiles/filedetails/?id=3732898734)
+- **[CounterStrikeSharp](https://github.com/roflmuffin/counterstrikesharp)**
+- **[Workshop Addon: Portal Model](https://steamcommunity.com/sharedfiles/filedetails/?id=3732898734)**
+- **[RayTrace](https://github.com/zakriamansoor47/Ray-Trace)**
 
 ## Configuration
 The config file is generated on first run under the counterstrikesharp/configs/plugins/SLAYER_Portals/ folder.
@@ -38,12 +39,8 @@ The config file is generated on first run under the counterstrikesharp/configs/p
 	"CTPlayerPortalsCount": 1, // Max portals per CT player. Use -1 for unlimited.
 	"TPlayerPortalsCount": 1, // Max portals per T player. Use -1 for unlimited.
 	"CTTotalPortalsCount": -1, // Max total portals for CT team. Use -1 for unlimited.
-	"TTotalPortalsCount": -1 // Max total portals for T team. Use -1 for unlimited.
+	"TTotalPortalsCount": -1, // Max total portals for T team. Use -1 for unlimited.
+	"CreatePortalsOnWallOnly": true, // Whether to only allow portal creation on walls
+	"PortalCreateOnWallDistance": -1 // The maximum distance from a wall at which a portal can be created (-1 for unlimited)
 }
 ```
-
-- CTPortalColor / TPortalColor: Portal color for each team. Valid values: blue, orange, purple, green, white, black, red, yellow, cyan, pink.
-- CTPlayerPortalsCount / TPlayerPortalsCount: Max portal pairs per player. Use -1 for unlimited.
-- CTTotalPortalsCount / TTotalPortalsCount: Max total portals for the team. Use -1 for unlimited.
-
-

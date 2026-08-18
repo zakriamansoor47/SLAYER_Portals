@@ -1,20 +1,20 @@
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
-using CounterStrikeSharp.API.Modules.Utils;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Cvars;
-using CounterStrikeSharp.API.Modules.Menu;
+using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
-using CounterStrikeSharp.API.Modules.Entities.Constants;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Drawing;
+using CounterStrikeSharp.API.Modules.Menu;
+using CounterStrikeSharp.API.Modules.Timers;
+using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
-using System.Runtime.InteropServices;
 using Vector3 = System.Numerics.Vector3;
 
 namespace SLAYER_Portals;
@@ -27,14 +27,16 @@ public class SLAYER_PortalsConfig : BasePluginConfig
     [JsonPropertyName("TPlayerPortalsCount")] public int TPlayerPortalsCount { get; set; } = 1; // How many portals a T player can place? (-1 for unlimited)
     [JsonPropertyName("CTTotalPortalsCount")] public int CTTotalPortalsCount { get; set; } = -1; // How many portals can the CTs place? (-1 for unlimited)
     [JsonPropertyName("TTotalPortalsCount")] public int TTotalPortalsCount { get; set; } = -1; // How many portals can the Ts place? (-1 for unlimited)
+    [JsonPropertyName("CreatePortalsOnWallOnly")] public bool CreatePortalsOnWallOnly { get; set; } = true; // Whether to only allow portal creation on walls
+    [JsonPropertyName("PortalCreateOnWallDistance")] public int PortalCreateOnWallDistance { get; set; } = -1; // The maximum distance from a wall at which a portal can be created (-1 for unlimited)
 }
-public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
+public partial class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
 {
     public override string ModuleName => "SLAYER_Portals";
     public override string ModuleVersion => "1.0";
     public override string ModuleAuthor => "SLAYER";
     public override string ModuleDescription => "Players can place portals and use them to teleport around the map.";
-    public required SLAYER_PortalsConfig Config {get; set;}
+    public required SLAYER_PortalsConfig Config { get; set; }
     public void OnConfigParsed(SLAYER_PortalsConfig config)
     {
         Config = config;
@@ -62,7 +64,7 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
     private readonly Dictionary<int, int> playerJustTeleported = new();
     private readonly Dictionary<uint, int> entityJustTeleported = new();
     private readonly List<uint> activeEntitiesIndex = new();
-    private readonly List<CCSPlayerController> activePlayers = new (); // We will keep track of active players in this list to optimize the teleportation checks, so we don't have to loop through all players every tick. We will add players to this list when they spawn and remove them when they disconnect or die.
+    private readonly List<CCSPlayerController> activePlayers = new(); // We will keep track of active players in this list to optimize the teleportation checks, so we don't have to loop through all players every tick. We will add players to this list when they spawn and remove them when they disconnect or die.
     private int tickCounter = 0; // We will use this counter to check for portal teleportation every 5 ticks (0.1 seconds) to prevent teleporting players too frequently when they are standing in the portal
     private const float PortalTouchWidthRange = 40f;
     private const float PortalTouchZRange = 100f;
@@ -71,9 +73,10 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
     private const float PortalExitForwardOffset = 16f;
     private const float PortalExitZOffset = 5f;
     private const int EntityTeleportCooldownTicks = 36;
-    
+
     public override void Load(bool hotReload)
     {
+        CRayTrace.Init();
         RegisterListener<Listeners.OnServerPrecacheResources>((manifest) =>
         {
             manifest.AddResource("models/portal/portal.vmdl");
@@ -86,7 +89,7 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
                 foreach (var entityInstance in Utilities.GetAllEntities())
                 {
                     if (entityInstance == null || !entityInstance.IsValid) continue;
-                    if(entityInstance.DesignerName.StartsWith("prop_") || entityInstance.DesignerName.StartsWith("weapon_") || entityInstance.DesignerName.EndsWith("_projectile"))
+                    if (entityInstance.DesignerName.StartsWith("prop_") || entityInstance.DesignerName.StartsWith("weapon_") || entityInstance.DesignerName.EndsWith("_projectile"))
                     {
                         var entity = new CBaseEntity(entityInstance.Handle);
                         activeEntitiesIndex.Add(entity.Index);
@@ -104,7 +107,7 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
                 }
                 tickCounter = 0; // Reset the counter after checking for teleportation
             }
-            
+
             foreach (var portalInfo in GetAllActivePortalsPairs())
             {
                 if (portalInfo.Portal1 != null && portalInfo.Portal1.IsValid && portalInfo.Portal2 != null && portalInfo.Portal2.IsValid)
@@ -112,9 +115,9 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
                     foreach (var player in activePlayers)
                     {
                         if (player == null || !player.IsValid || player.IsHLTV || player.Connected != PlayerConnectedState.Connected || player.TeamNum < 2 || player.PlayerPawn.Value!.LifeState != (byte)LifeState_t.LIFE_ALIVE) continue;
-                        
+
                         var playerId = player.Slot;
-                        if(playerJustTeleported.ContainsKey(playerId) && Server.TickCount - playerJustTeleported[playerId] < 36) continue; // If the player has just teleported in the last 36 ticks (0.6 seconds), we skip the teleportation checks for them to prevent them from getting teleported again immediately after teleporting
+                        if (playerJustTeleported.ContainsKey(playerId) && Server.TickCount - playerJustTeleported[playerId] < 36) continue; // If the player has just teleported in the last 36 ticks (0.6 seconds), we skip the teleportation checks for them to prevent them from getting teleported again immediately after teleporting
                         var playerPos = player.PlayerPawn.Value.AbsOrigin!;
                         // Check if the player is touching Portal1 and teleport them to Portal2, or if they are touching Portal2 and teleport them to Portal1
                         if (IsPlayerTouchingPortal(playerPos, portalInfo.Portal1))
@@ -126,11 +129,11 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
                             TeleportPlayerToPortal(player, portalInfo.Portal2, portalInfo.Portal1);
                         }
                     }
-                    foreach(var entityIndex in activeEntitiesIndex)
+                    foreach (var entityIndex in activeEntitiesIndex)
                     {
                         var entity = Utilities.GetEntityFromIndex<CBaseEntity>((int)entityIndex);
                         if (entity == null || !entity.IsValid) continue;
-                        if(entity.Handle == portalInfo.Portal1.Handle || entity.Handle == portalInfo.Portal2.Handle) continue; // We don't want to check for collision with the portal itself
+                        if (entity.Handle == portalInfo.Portal1.Handle || entity.Handle == portalInfo.Portal2.Handle) continue; // We don't want to check for collision with the portal itself
                         if (entityJustTeleported.TryGetValue(entity.Index, out var lastTick) && Server.TickCount - lastTick < EntityTeleportCooldownTicks) continue;
 
                         if (IsEntityTouchingPortal(entity.AbsOrigin!, portalInfo.Portal1))
@@ -144,7 +147,7 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
                     }
                 }
             }
-            
+
         });
         RegisterEventHandler<EventRoundStart>((@event, info) =>
         {
@@ -154,11 +157,11 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
         RegisterEventHandler<EventWeaponFire>((@event, info) =>
         {
             var player = @event.Userid;
-            if(player == null || !player.IsValid || player.IsBot || player.IsHLTV) return HookResult.Continue;
+            if (player == null || !player.IsValid || player.IsBot || player.IsHLTV) return HookResult.Continue;
 
             var weapon = @event.Weapon;
             // if weapon is not the taser or the player is not holding the attack2 button (which is usually the right mouse button), we don't want to place a portal
-            if(weapon != "weapon_taser" || !player.Buttons.HasFlag(PlayerButtons.Attack2)) return HookResult.Continue;
+            if (weapon != "weapon_taser" || !player.Buttons.HasFlag(PlayerButtons.Attack2)) return HookResult.Continue;
 
             var playerId = player.Slot;
             if (!playerPortals.ContainsKey(playerId))
@@ -170,25 +173,48 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
             var totalPlayerPortalCount = GetPlayerActivePortalsCount(playerId);
 
             // If the player has reached the maximum number of active portals pair they can place, we prevent them from placing more portals and send them a message in chat. 
-            if(!IsOddNumber(totalPlayerPortalCount) && ((Config.CTPlayerPortalsCount != -1 && player.TeamNum == 3 && playerPortalCount >= Config.CTPlayerPortalsCount) || (Config.TPlayerPortalsCount != -1 && player.TeamNum == 2 && playerPortalCount >= Config.TPlayerPortalsCount)))
+            if (!IsOddNumber(totalPlayerPortalCount) && ((Config.CTPlayerPortalsCount != -1 && player.TeamNum == 3 && playerPortalCount >= Config.CTPlayerPortalsCount) || (Config.TPlayerPortalsCount != -1 && player.TeamNum == 2 && playerPortalCount >= Config.TPlayerPortalsCount)))
             {
                 player.PrintToChat($"{Localizer["Chat.Prefix"]} {Localizer["Chat.MaxPortalsReached", playerPortalCount, player.TeamNum == 3 ? Config.CTPlayerPortalsCount : Config.TPlayerPortalsCount]}");
                 return HookResult.Continue;
             }
 
             var teamPortalCount = GetMaxActivePortalsForTeam(player.TeamNum);
-            if((Config.CTTotalPortalsCount != -1 && player.TeamNum == 3 && teamPortalCount >= Config.CTTotalPortalsCount) || (Config.TTotalPortalsCount != -1 && player.TeamNum == 2 && teamPortalCount >= Config.TTotalPortalsCount))
+            if ((Config.CTTotalPortalsCount != -1 && player.TeamNum == 3 && teamPortalCount >= Config.CTTotalPortalsCount) || (Config.TTotalPortalsCount != -1 && player.TeamNum == 2 && teamPortalCount >= Config.TTotalPortalsCount))
             {
                 player.PrintToChat($"{Localizer["Chat.Prefix"]} {Localizer["Chat.MaxTeamPortalsReached", teamPortalCount, player.TeamNum == 3 ? Config.CTTotalPortalsCount : Config.TTotalPortalsCount]}");
                 return HookResult.Continue;
             }
-            
+
+            CDynamicProp? createdPortal = null;
+
             var pawn = player.PlayerPawn.Value!;
             var angle = new QAngle(pawn.AbsRotation!.X, pawn.AbsRotation!.Y + 90, 0); // We want the portal to be aligned with the player's view, so we use the player's view angles but set roll to 0
             var forward = GetForwardVector(pawn.AbsRotation!);
-            var pos = pawn.AbsOrigin! + (new Vector(forward.X, forward.Y, 0) * 60f);
 
-            var createdPortal = CreatePortal(pos, angle, player.TeamNum == 3 ? Config.CTPortalColor : Config.TPortalColor); // Create the portal at the end position with the calculated angles and the player's team
+            if (Config.CreatePortalsOnWallOnly)
+            {
+                var eyePos = GetEyePosition(player);
+                TraceShape(eyePos, pawn.V_angle, pawn, new TraceOptions(InteractionLayers.MASK_SHOT_FULL, InteractionLayers.MASK_SHOT_FULL, InteractionLayers.Player | InteractionLayers.PlayerClip | InteractionLayers.NPCClip), out var traceResult);
+                if (traceResult.DidHit)
+                {
+                    var hitPoint = ConvertVector3ToVector(traceResult.HitPoint);
+                    if (Config.PortalCreateOnWallDistance < 1 || CalculateDistance(eyePos, hitPoint) <= Config.PortalCreateOnWallDistance)
+                    {
+                        //hitPoint.Z -= 70f; // We need to lower the hit point a bit because the portal model's origin is not at the center of the portal, but rather at the bottom of the portal, so we need to adjust the hit point downwards to make the portal appear correctly on the wall.
+                        // XY offset from the hitpoint. so model don't get stuck in the wall
+                        var pos = hitPoint - (new Vector(forward.X, forward.Y, 0) * 10f); // 10 units in front of the wall to prevent the portal from getting stuck in the wall and being unteleportable.
+                        createdPortal = CreatePortal(pos, angle, player.TeamNum == 3 ? Config.CTPortalColor : Config.TPortalColor); // Create the portal at the end position with the calculated angles and the player's team
+                        TryGetPropGroundAdjustedOrigin(createdPortal!, pos, out var adjustedPos); // we need to make sure portal isn't half in the ground
+                        createdPortal!.Teleport(adjustedPos, angle);
+                    }
+                }
+            }
+            else
+            {
+                var pos = pawn.AbsOrigin! + (new Vector(forward.X, forward.Y, 0) * 60f);
+                createdPortal = CreatePortal(pos, angle, player.TeamNum == 3 ? Config.CTPortalColor : Config.TPortalColor); // Create the portal at the end position with the calculated angles and the player's team
+            }
 
             // Now check it's a first or second portal for the player and assign it to the correct property in the PortalInfo class. If it's the first portal, we just create a new PortalInfo object and add it to the player's list. If it's the second portal, we find the first portal that doesn't have a second portal assigned yet and assign this new portal to it.
             if (IsOddNumber(totalPlayerPortalCount)) // If the player has an odd number of active portals, it means they have a first portal without a second portal, so we assign this new portal as the second portal for that PortalInfo object
@@ -243,7 +269,7 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
         portal.Teleport(new Vector(position.X, position.Y, position.Z + 55), angles, Vector.Zero);
         portal.DispatchSpawn();
         portal.AcceptInput("Skin", value: $"{portalColorMapping[color.ToLower()]}"); // Set the portal color based on the team. We use a mapping of color names to skin values to determine which skin to use for the portal based on the color specified in the config
-        
+
         var bodyComponent = portal.CBodyComponent;
         if (bodyComponent == null)
         {
@@ -268,18 +294,11 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
             var pos = portal.AbsOrigin!;
             portal.AcceptInput("SetScale", value: $"{entityScale}");
             portal.Teleport(new Vector(pos.X, pos.Y, pos.Z - 1)); // We need to keep teleporting the portal to the same position because changing the scale of the portal also changes its origin, so we need to keep teleporting it to the correct position to prevent it from moving downwards as it grows
-            
+
         }, TimerFlags.REPEAT);
-        
+
 
         return portal;
-    }
-    private static Vector GetForwardVector(QAngle angles)
-    {
-        float pitch = angles.X * (float)Math.PI / 180f;
-        float yaw = angles.Y * (float)Math.PI / 180f;
-        float cp = (float)Math.Cos(pitch);
-        return new Vector(cp * (float)Math.Cos(yaw), cp * (float)Math.Sin(yaw), (float)-Math.Sin(pitch));
     }
     private static Vector GetRightVector(QAngle angles)
     {
@@ -366,6 +385,47 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
     {
         return number % 2 != 0;
     }
+    private static Vector ConvertVector3ToVector(Vector3 vector)
+    {
+        return new Vector(vector.X, vector.Y, vector.Z);
+    }
+    private static Vector3 ConvertVectorToVector3(Vector vector)
+    {
+        return new Vector3(vector.X, vector.Y, vector.Z);
+    }
+    private float CalculateDistance(Vector point1, Vector point2)
+    {
+        float dx = point2.X - point1.X;
+        float dy = point2.Y - point1.Y;
+        float dz = point2.Z - point1.Z;
+
+        return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    private bool TryGetPropGroundAdjustedOrigin(CDynamicProp prop, Vector desiredOrigin, out Vector adjustedOrigin)
+    {
+        adjustedOrigin = desiredOrigin;
+
+        if (prop == null || !prop.IsValid || prop.Collision == null)
+            return false;
+
+        var mins = prop.Collision.Mins;
+        const float groundTraceUp = 16f;
+        const float groundTraceDown = 150f;
+        var traceStart = new Vector(desiredOrigin.X, desiredOrigin.Y, desiredOrigin.Z + groundTraceUp);
+        var traceEnd = new Vector(desiredOrigin.X, desiredOrigin.Y, desiredOrigin.Z - groundTraceDown);
+        var options = new TraceOptions(InteractionLayers.MASK_SHOT_FULL, InteractionLayers.MASK_SHOT_FULL, InteractionLayers.Player | InteractionLayers.PlayerClip);
+
+        if (TraceShape(traceStart, traceEnd, prop, options, out var trace) && trace.DidHit && !trace.IsAllSolid)
+        {
+            var groundZ = trace.HitPointZ;
+            var offset = (groundZ - desiredOrigin.Z) - mins.Z;
+            adjustedOrigin = new Vector(desiredOrigin.X, desiredOrigin.Y, desiredOrigin.Z + offset + 55f);
+            return true;
+        }
+
+        adjustedOrigin = new Vector(desiredOrigin.X, desiredOrigin.Y, desiredOrigin.Z - mins.Z);
+        return true;
+    }
     private bool IsPlayerTouchingPortal(Vector playerPos, CDynamicProp portal)
     {
         var portalPos = portal.AbsOrigin!;
@@ -413,11 +473,8 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
         var entryToPlayer = new Vector(pawn.AbsOrigin!.X - entryPos.X, pawn.AbsOrigin!.Y - entryPos.Y, pawn.AbsOrigin!.Z - entryPos.Z);
         var entryDepth = Dot(entryToPlayer, entryRight);
 
-        var exitNormal = GetRightVector(angles);
-        if (entryDepth < 0)
-        {
-            exitNormal = new Vector(-exitNormal.X, -exitNormal.Y, -exitNormal.Z);
-        }
+        var exitRight = GetRightVector(angles);
+        var exitNormal = new Vector(-exitRight.X, -exitRight.Y, -exitRight.Z);
 
         var boostedVelocity = pawn.AbsVelocity + (exitNormal * PortalExitVelocityBoost);
         var zOffset = pawn.AbsOrigin!.Z - entryPos.Z;
@@ -428,12 +485,14 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
         }
 
         var exitOffset = exitOffsetDir * PortalExitForwardOffset;
-        exitOffset.Z += PortalExitZOffset; 
-        var entryNormalYaw = GetYawFromVector(entryRight);
-        var exitNormalYaw = GetYawFromVector(GetRightVector(angles));
+        exitOffset.Z += PortalExitZOffset;
+
+        var entryFrontNormal = new Vector(-entryRight.X, -entryRight.Y, -entryRight.Z);
+        var entryFrontYaw = GetYawFromVector(entryFrontNormal);
+        var exitFrontYaw = GetYawFromVector(exitNormal);
         var playerYaw = pawn.AbsRotation!.Y;
-        var relativeYaw = NormalizeYaw(playerYaw - entryNormalYaw);
-        var targetYaw = NormalizeYaw(exitNormalYaw + relativeYaw + 180f);
+        var relativeYaw = NormalizeYaw(playerYaw - entryFrontYaw);
+        var targetYaw = entryDepth < 0 ? NormalizeYaw(exitFrontYaw + relativeYaw + 180f) : NormalizeYaw(exitFrontYaw + relativeYaw);
 
         playerJustTeleported[player.Slot] = Server.TickCount;
         pawn.BaseVelocity.X = boostedVelocity.X;
@@ -455,11 +514,8 @@ public class SLAYER_Portals : BasePlugin, IPluginConfig<SLAYER_PortalsConfig>
         var entryToEntity = new Vector(entity.AbsOrigin!.X - entryPos.X, entity.AbsOrigin!.Y - entryPos.Y, entity.AbsOrigin!.Z - entryPos.Z);
         var entryDepth = Dot(entryToEntity, entryRight);
 
-        var exitNormal = GetRightVector(angles);
-        if (entryDepth < 0)
-        {
-            exitNormal = new Vector(-exitNormal.X, -exitNormal.Y, -exitNormal.Z);
-        }
+        var exitRight = GetRightVector(angles);
+        var exitNormal = new Vector(-exitRight.X, -exitRight.Y, -exitRight.Z);
 
         var boostedVelocity = entity.AbsVelocity + (exitNormal * (entity.DesignerName.EndsWith("_Projectile") ? 0f : PortalExitVelocityBoost));
         var zOffset = entity.AbsOrigin!.Z - entryPos.Z;
