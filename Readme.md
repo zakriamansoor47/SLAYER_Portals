@@ -12,7 +12,7 @@ If you like this project, consider supporting me:
 </p>
 
 ## Description
-SLAYER_Portals lets players place paired portals in CS2 and teleport through them. Portals are placed with the taser holding right-click and then clicking left click. Portals are colored by team (CT or T). Players can teleport themselves, props, weapons, and projectiles through the portals. The plugin includes configurable limits on how many portals each player and team can have active at once. Portals have an oriented hitbox that follows their rotation, and exiting a portal preserves the player's height while adding a forward offset and velocity boost for smooth transitions. A cooldown prevents instant re-teleporting. Portals are cleared every round and removed when the plugin is unloaded.
+SLAYER_Portals lets players place paired portals in CS2 and teleport through them. Portals are placed with the taser holding right-click and then clicking left click. Portals are colored by team (CT or T). Players can teleport themselves, props, weapons, and projectiles through the portals. The plugin includes configurable limits on how many portals each player and team can have active at once. Portals have an oriented hitbox that follows their rotation, and exiting a portal preserves the player's height while adding a forward offset and velocity boost for smooth transitions. A cooldown prevents instant re-teleporting. Portals are cleared every round and removed when the plugin is unloaded. **Note: You can make it so portals can only be created on walls or at a certain distance from a wall using the config file.**
 
 ## Features
 - Place portals with the taser holding right-click (Attack2) and then left-click.
@@ -23,6 +23,8 @@ SLAYER_Portals lets players place paired portals in CS2 and teleport through the
 - Smooth exit: preserves entry height and adds a forward offset and velocity boost.
 - Teleport cooldown to prevent instant re-teleporting.
 - Portals are cleared every round and removed on plugin unload.
+- Portals can only be created on walls (optional).
+- Portals can only be created at a certain distance from a wall (optional).
 
 ## Requirements
 - **[CounterStrikeSharp](https://github.com/roflmuffin/counterstrikesharp)**
